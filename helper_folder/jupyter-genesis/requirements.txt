@@ -1,0 +1,6 @@
+virtualenv
+jupyterlab
+matplotlib
+tqdm
+numpy
+pandas
