@@ -4,66 +4,111 @@
       "predicted_grid_size": "6x6",
       "attempt_1": {
         "messages": [
-          "- The output grid is a 6x6 matrix formed by repeating and interleaving the input pairs.\n- The first row and the fourth row of the output consist of the first element of the first input pair followed by the second element, repeated across the row.\n- The second row and the fifth row consist of the first element of the second input pair followed by the second element, also repeated across the row.\n- The third row and the sixth row alternate the elements of the first input pair, starting with the second element.\n- The fourth row and the fifth row alternate the elements of the second input pair, starting with the second element.\n- The pattern creates a checkerboard-like structure, where elements from both input pairs appear in a specific repeating order."
+          "- The 6x6 output grid is constructed using a repeating pattern based on the 2x2 input grid.\n- The first row of the output grid is created by repeating the first row of the input grid horizontally.\n- The second row of the output grid is created by repeating the second row of the input grid horizontally.\n- The next two rows of the output grid are formed by swapping the two rows of the input grid, each repeated horizontally.\n- This swapping continues, maintaining the 2x2 structure throughout the 6x6 grid.\n- The pattern is consistent, creating a checkerboard-like arrangement with the two input pairs."
         ],
         "patterns": [
-          "1. The output is structured as a 6x6 matrix.\n2. Rows 1 and 4 contain repeated elements from the first input pair.\n3. Rows 2 and 5 contain repeated elements from the second input pair.\n4. Rows 3 and 6 alternate elements from the first input pair, starting with the second element.\n5. Rows 4 and 5 alternate elements from the second input pair, starting with the second element.\n6. A checkerboard-like structure is formed by the interleaving of elements from both input pairs.\n7. The first element of each input pair is positioned in even-numbered rows, while the second element appears in odd-numbered rows.\n8. The matrix exhibits symmetry with respect to the arrangement of elements in corresponding rows."
+          "1. The output grid is a 6x6 matrix formed from a 2x2 input grid.\n2. The first two rows of the output grid repeat the corresponding rows of the input grid horizontally.\n3. The next two rows of the output grid are created by swapping the first two rows of the input grid, each repeated horizontally.\n4. The pattern of swapping and repeating rows continues throughout the entire 6x6 grid.\n5. The overall arrangement results in a checkerboard-like pattern, maintaining the 2x2 input grid structure.\n6. Each row in the output grid corresponds to a specific row pattern from the input grid, either in its original or swapped form.\n7. The repetition and swapping maintain a consistent visual symmetry across the output grid."
         ],
-        "code": "def solve_task(input_grid):\n    if not input_grid or len(input_grid) != 2 or len(input_grid[0]) != 2:\n        return []\n\n    output_grid = [[input_grid[0][0]] * 6,\n                   [input_grid[1][0]] * 6,\n                   [input_grid[0][1]] + [input_grid[0][0]] * 4 + [input_grid[0][1]],\n                   [input_grid[0][0]] * 6,\n                   [input_grid[1][0]] * 6,\n                   [input_grid[0][1]] + [input_grid[0][0]] * 4 + [input_grid[0][1]]]\n\n    return output_grid",
+        "code": "def solve_task(input_grid):\n    if not input_grid or len(input_grid) < 2:\n        return []\n\n    output_grid = []\n    for i in range(2):\n        output_grid.append(input_grid[i] * 3)\n        output_grid.append(input_grid[(i + 1) % 2] * 3)\n    for i in range(2, len(input_grid)):\n        output_grid.append(input_grid[i] * 3)\n        output_grid.append(input_grid[(i - 1) % 2] * 3)\n    return output_grid",
         "revised_code": "",
         "prediction": [
           [
             3,
-            3,
-            3,
-            3,
-            3,
-            3
-          ],
-          [
-            7,
-            7,
-            7,
-            7,
-            7,
-            7
-          ],
-          [
             2,
             3,
-            3,
-            3,
+            2,
             3,
             2
           ],
           [
-            3,
-            3,
-            3,
-            3,
-            3,
-            3
+            7,
+            8,
+            7,
+            8,
+            7,
+            8
           ],
           [
             7,
+            8,
             7,
+            8,
             7,
-            7,
-            7,
-            7
+            8
           ],
           [
+            3,
             2,
             3,
-            3,
-            3,
+            2,
             3,
             2
           ]
         ]
       },
       "attempt_2": {
-        "predicted_grid_size": "6x6"
+        "messages": [
+          "- The output grid is a 6x6 matrix constructed using repeated patterns based on the input pairs.\n- Each pair of input numbers creates two distinct rows that alternate in the output.\n- The first input pair (e.g., [8, 6] in Example 1) generates alternating rows of the form: \n  - First row: repeated values from the first input (e.g., [8, 6, 8, 6, 8, 6])\n  - Second row: repeated values from the second input (e.g., [6, 4, 6, 4, 6, 4])\n- The subsequent rows alternate between the two input pairs, creating a checkerboard-like pattern.\n- The pattern continues, alternating between the first and second pairs' arrangements, ensuring that each input number is represented in the grid. \n- The output maintains a consistent structure with vertical and horizontal repetitions, ensuring symmetry in the placement of the input values."
+        ],
+        "patterns": [
+          "1. The output grid is a 6x6 matrix created from repeated patterns based on input pairs.\n2. Each pair of input numbers generates two distinct rows that alternate in the output grid.\n3. The first row of the output is constructed by repeating the first number from the input pair.\n4. The second row of the output is constructed by repeating the second number from the input pair.\n5. The construction of rows follows a checkerboard-like pattern, alternating between different input pairs.\n6. Each input pair contributes to two rows, ensuring each number is represented in both horizontal and vertical orientations.\n7. The first input pair generates rows of the form [first number, second number] with a consistent repetition.\n8. The output maintains a symmetrical structure with consistent vertical and horizontal repetitions of values.\n9. Subsequent input pairs continue the established pattern without disrupting the overall grid structure.\n10. The arrangement ensures that each number from the input pairs appears in a balanced manner throughout the grid."
+        ],
+        "code": "def solve_task(input_grid):\n    if not input_grid or len(input_grid) % 2 != 0:\n        return []\n\n    output_grid = []\n    for i in range(0, len(input_grid), 2):\n        row1 = [input_grid[i]] * 6\n        row2 = [input_grid[i+1]] * 6\n        output_grid.append(row1)\n        output_grid.append(row2)\n\n        if i + 2 < len(input_grid):\n            row3 = [input_grid[i+2]] * 6\n            row4 = [input_grid[i+3]] * 6\n            output_grid.append(row3)\n            output_grid.append(row4)\n\n    return output_grid",
+        "revised_code": "",
+        "prediction": [
+          [
+            [
+              3,
+              2
+            ],
+            [
+              3,
+              2
+            ],
+            [
+              3,
+              2
+            ],
+            [
+              3,
+              2
+            ],
+            [
+              3,
+              2
+            ],
+            [
+              3,
+              2
+            ]
+          ],
+          [
+            [
+              7,
+              8
+            ],
+            [
+              7,
+              8
+            ],
+            [
+              7,
+              8
+            ],
+            [
+              7,
+              8
+            ],
+            [
+              7,
+              8
+            ],
+            [
+              7,
+              8
+            ]
+          ]
+        ]
       }
     }
   ]
