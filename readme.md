@@ -27,11 +27,11 @@ The **Abstraction and Reasoning Corpus for Artificial General Intelligence [ARC-
 ## 🤖 Agentic Framework
 The model processes each task in a linear agentic framework by:
 
-**Identifying Logic:** Analyzing task descriptions and patterns.
-**Recognizing Patterns:** Selecting relevant tools for the task.
-**Generating Code:** Creating a solve_task function to manipulate grids.
-**Revising Code:** Refining the generated code for accuracy and efficiency.
-**Executing Code:** Running the solve_task function to generate predictions.
+**Identifying Logic:** Analyzing task descriptions and patterns.<br>
+**Recognizing Patterns:** Selecting relevant tools for the task.<br>
+**Generating Code:** Creating a solve_task function to manipulate grids.<br>
+**Revising Code:** Refining the generated code for accuracy and efficiency.<br>
+**Executing Code:** Running the solve_task function to generate predictions.<br>
 
 ## 📝 Configuration and Usage
 1. **Clone the Repository**:<br> 
