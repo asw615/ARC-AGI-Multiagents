@@ -1,15 +1,16 @@
 ###############################################################################
 # analysis_from_json.R
-# Reads raw JSON submissions and official ARC-AGI solutions directly,
-# computes pixel correctness, aggregates results, does Wilcoxon tests,
-# and produces a New York Times–styled table + bar plot.
+# Updated to include:
+#   - Renamed labels for the NYT table
+#   - Removal of solve_rate column
+#   - Inclusion of Wilcoxon score and p-value from an external CSV
 ###############################################################################
 
 # 1) LOAD REQUIRED LIBRARIES
-install.packages("tidyverse")  # if not already installed
-install.packages("jsonlite")   # for reading JSON
-install.packages("gt")         # for the NYT-styled table
-install.packages("rstatix")    # optional, for easy Wilcoxon if tasks are paired
+# install.packages("tidyverse")  # if not already installed
+# install.packages("jsonlite")   # for reading JSON
+# install.packages("gt")         # for the NYT-styled table
+# install.packages("rstatix")    # optional, for easy Wilcoxon if tasks are paired
 
 library(tidyverse)
 library(jsonlite)
@@ -19,17 +20,13 @@ library(rstatix)   # optional, for pairwise_wilcox_test or wilcox_test
 ###############################################################################
 # 2) CONFIGURATION: PATHS AND FILENAMES
 ###############################################################################
-# Adjust these paths as needed to match your project structure.
-
 results_dir <- "results"          # Where the submission_X.json files live
 data_dir    <- "data/challenges"  # Where arc-agi_evaluation_solutions.json is stored
 
 # List of JSON submissions we want to score
 submission_files <- c(
-  "detailed_outputs.json",
   "submission_4o.json",
   "submission_4omini.json",
-  "submission_agents.json",
   "submission_agentswtool.json",
   "submission_finetune4o.json",
   "submission_finetune4omini.json"
@@ -38,29 +35,18 @@ submission_files <- c(
 # Official evaluation solutions, keyed by task_id
 solutions_file <- file.path(data_dir, "arc-agi_evaluation_solutions.json")
 
+# Location of the external CSV that contains Wilcoxon info
+evaluation_summary_csv <- file.path(results_dir, "evaluation_summary.csv")
+
 ###############################################################################
 # 3) READ OFFICIAL SOLUTIONS
 ###############################################################################
 solutions_list <- read_json(solutions_file)
 
-# This should look something like:
-# {
-#   "0520fde7": [
-#     [[...grid...]],  # solution for pair_index=0
-#     [[...grid...]],  # solution for pair_index=1
-#     ...
-#   ],
-#   "task_id_2": [...],
-#   ...
-# }
-
 ###############################################################################
 # 4) FUNCTION TO COMPARE TWO GRIDS
 ###############################################################################
 compare_grids <- function(predicted, actual) {
-  # predicted, actual: each is a list of lists in R (or matrix).
-  # Return a named vector: c(is_exact=BOOL, pixel_percentage=NUM, correct_count=NUM)
-  
   # Basic dimension checks
   if (!is.list(predicted) || !is.list(actual)) {
     return(c(is_exact=0, pixel_percentage=0, correct_count=0))
@@ -95,57 +81,45 @@ compare_grids <- function(predicted, actual) {
 # 5) FUNCTION TO SCORE A SINGLE SUBMISSION
 ###############################################################################
 score_submission <- function(submission_path, solutions_list) {
-  # Reads a JSON submission, compares each pair's best attempt to the official solutions,
-  # returns a data frame of per-task results.
-
   submission_name <- basename(submission_path)
   submission_data <- read_json(submission_path)
   
-  # We'll build a data frame row by row:
   all_rows <- list()
   
   for (task_id in names(submission_data)) {
-    # If the task_id is not in solutions_list, skip
-    if (! task_id %in% names(solutions_list)) {
+    if (!task_id %in% names(solutions_list)) {
       next
     }
     
-    pairs_submission <- submission_data[[task_id]]      # List of pair data
-    pairs_solutions  <- solutions_list[[task_id]]       # Corresponding solutions
+    pairs_submission <- submission_data[[task_id]]
+    pairs_solutions  <- solutions_list[[task_id]]
     
-    # For each pair index
     for (pair_index in seq_along(pairs_submission)) {
-      pair_attempts <- pairs_submission[[pair_index]]   # e.g. a named list with attempts
+      pair_attempts <- pairs_submission[[pair_index]]
       if (pair_index > length(pairs_solutions)) {
-        # If the solution doesn't have that many pairs, skip
         next
       }
-      actual_solution <- solutions_list[[task_id]][[pair_index]]
+      actual_solution <- pairs_solutions[[pair_index]]
       
-      # We'll track the best attempt
       best_pixel <- 0.0
       is_solved <- 0.0
       
-      # Evaluate each attempt in the pair
       for (attempt_key in names(pair_attempts)) {
         attempt_grid <- pair_attempts[[attempt_key]]
         cmp <- compare_grids(attempt_grid, actual_solution)
-        # cmp is c(is_exact=?, pixel_percentage=?, correct_count=?)
         if (cmp["pixel_percentage"] > best_pixel) {
           best_pixel <- cmp["pixel_percentage"]
         }
         if (cmp["is_exact"] == 1) {
           is_solved <- 1
-          # we can break here if we want to stop after finding an exact match
           break
         }
       }
       
-      # Construct a row
       row_data <- tibble(
         submission_name   = submission_name,
         task_id           = task_id,
-        pair_index        = pair_index - 1,  # 0-based or 1-based, your preference
+        pair_index        = pair_index - 1,  # 0-based or 1-based
         pixel_correctness = best_pixel,
         is_solved         = is_solved
       )
@@ -153,7 +127,6 @@ score_submission <- function(submission_path, solutions_list) {
     }
   }
   
-  # Combine all rows
   if (length(all_rows) == 0) {
     return(tibble(
       submission_name   = character(),
@@ -163,8 +136,7 @@ score_submission <- function(submission_path, solutions_list) {
       is_solved         = numeric()
     ))
   }
-  result_df <- bind_rows(all_rows)
-  result_df
+  bind_rows(all_rows)
 }
 
 ###############################################################################
@@ -174,7 +146,7 @@ submissions_all <- tibble()
 
 for (fname in submission_files) {
   full_path <- file.path(results_dir, fname)
-  if (! file.exists(full_path)) {
+  if (!file.exists(full_path)) {
     message(sprintf("File %s not found, skipping.", fname))
     next
   }
@@ -182,20 +154,15 @@ for (fname in submission_files) {
   submissions_all <- bind_rows(submissions_all, scored_df)
 }
 
-# Now we have a data frame "submissions_all" with columns:
-# submission_name, task_id, pair_index, pixel_correctness, is_solved
-
 ###############################################################################
 # 7) MAP FILENAMES TO HUMAN-FRIENDLY NAMES
 ###############################################################################
 submission_map <- c(
-  "submission_4o.json"          = "GPT-4o",           # Good
-  "submission_4omini.json"      = "GPT-4o-mini",      # Good
-  "submission_agents.json"      = "Agents",
-  "submission_agentswtool.json" = "Agents + Tools",
-  "submission_finetune4o.json"  = "Fine-tuned GPT 4o",
-  "submission_finetune4omini.json" = "Fine-tuned GPT 4o-mini",
-  "detailed_outputs.json"       = "Detailed Baseline"
+  "submission_4o.json"             = "GPT-4o",
+  "submission_4omini.json"         = "GPT-4o-mini",
+  "submission_agentswtool.json"    = "Agents + Tools",
+  "submission_finetune4o.json"     = "Fine-tuned GPT-4o",
+  "submission_finetune4omini.json" = "Fine-tuned GPT-4o-mini"
 )
 
 submissions_all <- submissions_all %>%
@@ -206,90 +173,78 @@ submissions_all <- submissions_all %>%
 
 ###############################################################################
 # 8) AGGREGATE RESULTS: MEAN, SD, # of tasks solved, etc.
+#    (Now grouped by BOTH submission_name and submission_label so we can join.)
 ###############################################################################
 summary_df <- submissions_all %>%
-  group_by(submission_label) %>%
+  group_by(submission_name, submission_label) %>%
   summarise(
-    tasks_evaluated   = n_distinct(task_id),            # # of tasks
-    pairs_evaluated   = n(),                            # total # of pairs
-    mean_pixel        = mean(pixel_correctness, na.rm=TRUE),
-    sd_pixel          = sd(pixel_correctness, na.rm=TRUE),
-    se_pixel          = sd_pixel / sqrt(n()),
-    solve_rate        = mean(is_solved, na.rm=TRUE) * 100  # % tasks solved
+    tasks_evaluated = n_distinct(task_id),
+    pairs_evaluated = n(),
+    mean_pixel      = mean(pixel_correctness, na.rm = TRUE),
+    sd_pixel        = sd(pixel_correctness, na.rm = TRUE),
+    se_pixel        = sd_pixel / sqrt(n()),
+    solve_rate      = mean(is_solved, na.rm = TRUE) * 100
   ) %>%
   ungroup()
 
 ###############################################################################
-# 9) OPTIONAL: WILCOXON TESTS IF YOU WANT TO COMPARE SUBMISSIONS
+# 9) OPTIONAL: READ EXTERNAL CSV TO ADD WILCOXON INFO
 ###############################################################################
-# Since we have per-pair data, we can do a repeated-measures approach if each
-# submission tackled the EXACT same tasks/pairs. We'll do an example:
-# "pairwise" approach across all submissions. We must ensure the data is "paired."
-
-# We'll pivot to wide format for pixel correctness if we want a direct approach.
-# Then each row is (task_id, pair_index), columns are each submission label.
-wide_df <- submissions_all %>%
-  select(submission_label, task_id, pair_index, pixel_correctness) %>%
-  pivot_wider(
-    names_from = submission_label,
-    values_from = pixel_correctness
+# The CSV file you provided includes columns:
+#   submission_name, total_score, total_tasks_scored, percentage,
+#   mean_pixel_correct, median_pixel_correct, wilcoxon_p_value
+#
+# Suppose we interpret `total_score` as the “Wilcoxon score” and
+# keep `wilcoxon_p_value` as p_value. For the "Reference," we keep as-is.
+###############################################################################
+external_results <- read_csv(evaluation_summary_csv) %>%
+  # Example of renaming for clarity:
+  rename(
+    tasks_solved = total_score,
+    p_value        = wilcoxon_p_value
   )
+# Note that for "submission_4o.json", the p_value might be "Reference" 
+# or some special string. We'll keep that.
 
-# If the same tasks/pairs appear for each submission, no missing data:
-# Let’s do an example: Compare "GPT 4o" to each other submission with a paired Wilcoxon.
-# We'll do a function for convenience:
-compare_submissions <- function(df_wide, col1, col2) {
-  # Keep only rows that are not NA in both columns
-  df_filt <- df_wide %>%
-    filter(!is.na(.data[[col1]]), !is.na(.data[[col2]]))
-  
-  # Paired Wilcoxon
-  res <- wilcox_test(df_filt, formula = as.formula(paste0(col1, " ~ ", col2)),
-                     paired=TRUE)
-  res
-}
-
-# Example: let's do pairwise across summary_df$submission_label
-# But we must skip the ones that don't exist. We'll keep it simple:
-available_submissions <- unique(submissions_all$submission_label)
-reference_sub <- "GPT 4o"  # e.g. pick GPT 4o as the reference
-
-wilcox_results_list <- list()
-
-if (reference_sub %in% available_submissions) {
-  for (sub_label in available_submissions) {
-    if (sub_label == reference_sub) next
-    # do a paired test col1= reference_sub, col2=sub_label
-    if (reference_sub %in% names(wide_df) && sub_label %in% names(wide_df)) {
-      wres <- compare_submissions(wide_df, reference_sub, sub_label)
-      wilcox_results_list[[sub_label]] <- wres
-    }
-  }
-}
-
-# Inspect results
-wilcox_results_list
+# Join by submission_name
+summary_df <- left_join(summary_df, external_results, by = "submission_name")
 
 ###############################################################################
 # 10) CREATE A NEW YORK TIMES–STYLE TABLE
+#     - Rename columns:
+#         submission_label -> model
+#         pairs_evaluated  -> tasks_solved
+#     - Remove solve_rate
+#     - Include columns for Wilcoxon score + p-value
 ###############################################################################
 nyt_table <- summary_df %>%
+  rename(
+    model        = submission_label,
+    tasks = tasks_evaluated
+  ) %>%
+  # Select the columns you want in the final table
   select(
-    submission_label,
-    tasks_evaluated,
-    pairs_evaluated,
+    model,
+    tasks,
+    tasks_solved,
     mean_pixel,
     sd_pixel,
-    solve_rate
+    p_value  # newly joined column
   ) %>%
   arrange(desc(mean_pixel)) %>%
   gt() %>%
   tab_header(
-    title    = "ARC-AGI Evaluation Summary from JSON",
+    title = "ARC-AGI Evaluation Summary"
   ) %>%
   fmt_number(
-    columns = c(mean_pixel, sd_pixel, solve_rate),
+    columns = c(mean_pixel, sd_pixel, tasks_solved),
     decimals = 2
+  ) %>%
+  # If p_value is numeric, you can also format it. If it might be "Reference",
+  # you may need to treat that carefully. For now, just attempt numeric format:
+  fmt_number(
+    columns = c(p_value),
+    decimals = 4
   ) %>%
   tab_options(
     table.font.names = "New York Times"
@@ -300,7 +255,6 @@ print(nyt_table)
 ###############################################################################
 # 11) CREATE A BAR PLOT OF MEAN PIXEL CORRECTNESS WITH REAL CI
 ###############################################################################
-# We can compute a 95% CI = mean ± 1.96 * se_pixel.
 df_plot <- summary_df %>%
   mutate(
     ci_lower = mean_pixel - 1.96 * se_pixel,
@@ -313,20 +267,20 @@ ggplot(df_plot, aes(x = reorder(submission_label, mean_pixel),
   geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0.3) +
   coord_flip() +
   labs(
-    title = "Mean Pixel Correctness with 95% Confidence Intervals",
-    subtitle = "Computed directly from JSON data",
-    x = "Submission",
-    y = "Mean Pixel Correctness (%)"
+    title = "Mean Pixel Correctnesss",
+    x = "",
+    y = ""
   ) +
-  theme_minimal(base_size = 14)
+  theme_minimal(base_size = 18) +
+  theme(
+    plot.title = element_text(hjust = 10),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background = element_rect(fill = "white", color = NA)
+  )
 
 ###############################################################################
 # 12) OPTIONAL: SAVE OUTPUTS
 ###############################################################################
-# Save table as an HTML or PNG:
-#gtsave(nyt_table, "nyt_table_from_json.html")
-# Or:
-gtsave(nyt_table, "nyt_table_from_json.png")
+gtsave(nyt_table, "results/table_of_results.png")
+ggsave("results/barplot_pixel_correctness.png", width=6, height=4)
 
-# Save bar plot if desired:
-ggsave("barplot_pixel_correctness_from_json.png", width=6, height=4)
