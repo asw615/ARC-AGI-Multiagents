@@ -1,27 +1,36 @@
 ###############################################################################
 # analysis_from_json.R
 # Updated to include:
-#   - Renamed labels for the NYT table
-#   - Removal of solve_rate column
-#   - Inclusion of Wilcoxon score and p-value from an external CSV
+#   - Asterisks for p-values with significance codes
+#   - A footnote/description about Wilcoxon test
+#   - A "percentage_correct" column (formerly solve_rate)
 ###############################################################################
 
 # 1) LOAD REQUIRED LIBRARIES
-# install.packages("tidyverse")  # if not already installed
-# install.packages("jsonlite")   # for reading JSON
-# install.packages("gt")         # for the NYT-styled table
-# install.packages("rstatix")    # optional, for easy Wilcoxon if tasks are paired
+#install.packages("tidyverse")  # if not already installed
+#install.packages("jsonlite")   # for reading JSON
+#install.packages("gt")         # for the NYT-styled table
+#install.packages("rstatix")    # optional, for easy Wilcoxon if tasks are paired
+#install.packages("webshot2")   # for gtsave()
+install.packages("webshot2")    # if not installed
+webshot::install_phantomjs()    # important!
 
 library(tidyverse)
 library(jsonlite)
 library(gt)
 library(rstatix)   # optional, for pairwise_wilcox_test or wilcox_test
+library(webshot2)  # ensure webshot2 is installed for gtsave()
 
 ###############################################################################
 # 2) CONFIGURATION: PATHS AND FILENAMES
 ###############################################################################
 results_dir <- "results"          # Where the submission_X.json files live
 data_dir    <- "data/challenges"  # Where arc-agi_evaluation_solutions.json is stored
+
+# Ensure the results directory exists
+if (!dir.exists(results_dir)) {
+  dir.create(results_dir)
+}
 
 # List of JSON submissions we want to score
 submission_files <- c(
@@ -173,7 +182,7 @@ submissions_all <- submissions_all %>%
 
 ###############################################################################
 # 8) AGGREGATE RESULTS: MEAN, SD, # of tasks solved, etc.
-#    (Now grouped by BOTH submission_name and submission_label so we can join.)
+#    Here we create 'solve_rate' as the % of tasks with is_solved=1
 ###############################################################################
 summary_df <- submissions_all %>%
   group_by(submission_name, submission_label) %>%
@@ -183,77 +192,131 @@ summary_df <- submissions_all %>%
     mean_pixel      = mean(pixel_correctness, na.rm = TRUE),
     sd_pixel        = sd(pixel_correctness, na.rm = TRUE),
     se_pixel        = sd_pixel / sqrt(n()),
-    solve_rate      = mean(is_solved, na.rm = TRUE) * 100
+    solve_rate      = mean(is_solved, na.rm = TRUE) * 100,  # this is the % correct answers
+    .groups = "drop"
   ) %>%
   ungroup()
 
 ###############################################################################
 # 9) OPTIONAL: READ EXTERNAL CSV TO ADD WILCOXON INFO
+#    Expecting columns: 
+#      submission_name, total_score (= Wilcoxon rank sum?), 
+#      total_tasks_scored, percentage, mean_pixel_correct, 
+#      median_pixel_correct, wilcoxon_p_value
 ###############################################################################
-# The CSV file you provided includes columns:
-#   submission_name, total_score, total_tasks_scored, percentage,
-#   mean_pixel_correct, median_pixel_correct, wilcoxon_p_value
-#
-# Suppose we interpret `total_score` as the “Wilcoxon score” and
-# keep `wilcoxon_p_value` as p_value. For the "Reference," we keep as-is.
-###############################################################################
-external_results <- read_csv(evaluation_summary_csv) %>%
-  # Example of renaming for clarity:
+external_results <- read_csv(
+  evaluation_summary_csv,
+  show_col_types = FALSE  # Suppress the column specification message
+) %>%
   rename(
-    tasks_solved = total_score,
-    p_value        = wilcoxon_p_value
+    tasks_solved = total_score,  # rename to something more human-friendly
+    p_value      = wilcoxon_p_value
   )
-# Note that for "submission_4o.json", the p_value might be "Reference" 
-# or some special string. We'll keep that.
+
+# Verify the required columns are present
+required_columns <- c("submission_name", "tasks_solved", "p_value")
+missing_cols <- setdiff(required_columns, names(external_results))
+if (length(missing_cols) > 0) {
+  stop("Missing columns in evaluation_summary.csv: ", paste(missing_cols, collapse = ", "))
+}
+
+# Handle non-numeric p_value entries gracefully
+external_results <- external_results %>%
+  mutate(
+    p_value = vapply(p_value, function(val) {
+      val_trimmed <- trimws(val)
+      if (grepl("^\\d+(\\.\\d+)?$", val_trimmed)) {
+        sprintf("%.4f", as.numeric(val_trimmed))
+      } else {
+        val_trimmed
+      }
+    }, character(1))
+  )
 
 # Join by submission_name
 summary_df <- left_join(summary_df, external_results, by = "submission_name")
 
 ###############################################################################
-# 10) CREATE A NEW YORK TIMES–STYLE TABLE
-#     - Rename columns:
-#         submission_label -> model
-#         pairs_evaluated  -> tasks_solved
-#     - Remove solve_rate
-#     - Include columns for Wilcoxon score + p-value
+# 10) HELPER FUNCTION TO ADD ASTERISKS TO P-VALUES
+###############################################################################
+add_p_value_asterisks <- function(x) {
+  sapply(x, function(val) {
+    val_trimmed <- trimws(val)
+    # If the cell isn't purely numeric (e.g. "Reference"), return as-is
+    if (!grepl("^\\d+(\\.\\d+)?$", val_trimmed)) {
+      return(val)
+    } else {
+      val_num <- as.numeric(val_trimmed)
+      # Add asterisks based on common significance levels
+      if (val_num < 0.001) {
+        paste0(sprintf("%.4f", val_num), "***")
+      } else if (val_num < 0.01) {
+        paste0(sprintf("%.4f", val_num), "**")
+      } else if (val_num < 0.05) {
+        paste0(sprintf("%.4f", val_num), "*")
+      } else {
+        # No asterisks if p >= .05
+        sprintf("%.4f", val_num)
+      }
+    }
+  })
+}
+
+###############################################################################
+# 11) CREATE A NEW YORK TIMES–STYLE TABLE
+#     - Rename columns
+#     - Include percentage of correct answers (solve_rate) in the final table
+#     - Add p-value asterisks & footnotes
 ###############################################################################
 nyt_table <- summary_df %>%
   rename(
-    model        = submission_label,
-    tasks = tasks_evaluated
+    `Model Name` = submission_label,
+    `Tasks Evaluated` = tasks_evaluated,
+    `Tasks Solved` = tasks_solved,
+    `Percentage Correct (%)` = solve_rate,
+    `Mean Pixel Accuracy (%)` = mean_pixel,
+    `Standard Deviation (Pixel)` = sd_pixel,
+    `p-value` = p_value
   ) %>%
-  # Select the columns you want in the final table
   select(
-    model,
-    tasks,
-    tasks_solved,
-    mean_pixel,
-    sd_pixel,
-    p_value  # newly joined column
+    `Model Name`,
+    `Tasks Evaluated`,
+    `Tasks Solved`,
+    `Percentage Correct (%)`,
+    `Mean Pixel Accuracy (%)`,
+    `Standard Deviation (Pixel)`,
+    `p-value`
   ) %>%
-  arrange(desc(mean_pixel)) %>%
+  arrange(desc(`Mean Pixel Accuracy (%)`)) %>%
   gt() %>%
   tab_header(
     title = "ARC-AGI Evaluation Summary"
   ) %>%
   fmt_number(
-    columns = c(mean_pixel, sd_pixel, tasks_solved),
+    columns = c(`Mean Pixel Accuracy (%)`, `Standard Deviation (Pixel)`, `Tasks Solved`, `Percentage Correct (%)`),
     decimals = 2
   ) %>%
-  # If p_value is numeric, you can also format it. If it might be "Reference",
-  # you may need to treat that carefully. For now, just attempt numeric format:
-  fmt_number(
-    columns = c(p_value),
-    decimals = 4
+  # Format p-values & add significance asterisks
+  fmt(
+    columns = c(`p-value`),
+    fns = add_p_value_asterisks
+  ) %>%
+  # Add a footnote to the p_value column label
+  tab_footnote(
+    footnote = "p-values computed via Wilcoxon test on pixel correctness.",
+    locations = cells_column_labels(columns = `p-value`)
+  ) %>%
+  # Add a source note below the table for significance codes
+  tab_source_note(
+    source_note = md("Significance codes: ***p < 0.001, **p < 0.01, *p < 0.05")
   ) %>%
   tab_options(
     table.font.names = "New York Times"
   )
 
-print(nyt_table)
 
 ###############################################################################
-# 11) CREATE A BAR PLOT OF MEAN PIXEL CORRECTNESS WITH REAL CI
+# 12) CREATE A BAR PLOT OF MEAN PIXEL CORRECTNESS WITH REAL CI
 ###############################################################################
 df_plot <- summary_df %>%
   mutate(
@@ -261,26 +324,24 @@ df_plot <- summary_df %>%
     ci_upper = mean_pixel + 1.96 * se_pixel
   )
 
-ggplot(df_plot, aes(x = reorder(submission_label, mean_pixel),
-                    y = mean_pixel)) +
+ggplot(df_plot, aes(x = reorder(model, mean_pixel), y = mean_pixel)) +
   geom_col(fill = "steelblue") +
   geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0.3) +
   coord_flip() +
   labs(
-    title = "Mean Pixel Correctnesss",
+    title = "Mean Pixel Correctness",
     x = "",
     y = ""
   ) +
   theme_minimal(base_size = 18) +
   theme(
-    plot.title = element_text(hjust = 10),
+    plot.title = element_text(hjust = 0.5),  # Center the title
     panel.background = element_rect(fill = "white", color = NA),
     plot.background = element_rect(fill = "white", color = NA)
   )
 
 ###############################################################################
-# 12) OPTIONAL: SAVE OUTPUTS
+# 13) OPTIONAL: SAVE OUTPUTS
 ###############################################################################
 gtsave(nyt_table, "results/table_of_results.png")
-ggsave("results/barplot_pixel_correctness.png", width=6, height=4)
-
+#ggsave("results/barplot_pixel_correctness.png", width=6, height=4)
