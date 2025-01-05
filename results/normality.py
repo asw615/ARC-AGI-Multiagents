@@ -9,7 +9,9 @@ import logging
 
 from typing import Tuple, Dict, Any, List
 from matplotlib import colors
-from scipy.stats import ttest_ind, shapiro, kstest
+from scipy.stats import (
+    ttest_rel, shapiro, kstest, wilcoxon, t
+)
 import scipy.stats as stats
 
 logging.basicConfig(level=logging.INFO)
@@ -21,9 +23,9 @@ logger = logging.getLogger(__name__)
 # Adjust these paths as needed
 BASE_PATH = 'data/challenges/'
 RESULTS_DIRECTORY = r"C:\Users\Soren\Documents\ARC-AGI-Multiagents\results"
-EVAL_FILE_15x15 = '28_15x15_evaluation.json'     # Subset of evaluation tasks
+EVAL_FILE_15x15 = '28_15x15_evaluation.json'  # Subset of evaluation tasks
 EVAL_SOLUTIONS_FILE = 'arc-agi_evaluation_solutions.json'
-REFERENCE_SUBMISSION = "submission_4o.json"     # The model to compare against
+REFERENCE_SUBMISSION = "submission_4o.json"  # The model to compare against
 
 ###############################################################################
 # STEP 1: LOAD EVALUATION DATA
@@ -80,7 +82,7 @@ def score_submission(submission_file_name: str, solutions: Dict[str, Any]) -> Di
       'percentage': float,
       'pixel_correctness_list': List[float],
       'task_scores': Dict[str, float],
-      'task_pixel_details': Dict[str, List[Dict]]]  # additional detail for each task/pair
+      'task_pixel_details': Dict[str, List[Dict]]  # additional detail for each task/pair
     }
     """
     submission_name = os.path.basename(submission_file_name)
@@ -114,15 +116,13 @@ def score_submission(submission_file_name: str, solutions: Dict[str, Any]) -> Di
             best_pixel_score = 0.0
             best_correct_count = 0
             pair_correct = False
-            solution = task_pairs[pair_index]  # ground truth solution for this pair
+            solution = task_pairs[pair_index]  # ground truth solution
 
             for attempt_key, attempt_grid in pair_attempts.items():
                 is_exact, pixel_percentage, correct_count = compare_solutions(attempt_grid, solution)
-
                 if pixel_percentage > best_pixel_score:
                     best_pixel_score = pixel_percentage
                     best_correct_count = correct_count
-
                 if is_exact:
                     pair_correct = True
                     break
@@ -159,15 +159,13 @@ def score_submission(submission_file_name: str, solutions: Dict[str, Any]) -> Di
     }
 
 ###############################################################################
-# STEP 3: GATHER RESULTS FROM THE RESULTS FOLDER
+# STEP 3: GATHER RESULTS
 ###############################################################################
 def gather_all_results(results_dir: str, solutions: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
-    Iterates over a predefined list of submission files or all JSON files in
-    the results directory, scores them, and returns the aggregated results.
+    Iterates over a predefined list of submission files, scores them,
+    and returns the aggregated results.
     """
-    # You may adjust this if you want to auto-discover all JSON files instead:
-    # submission_files = [f for f in os.listdir(results_dir) if f.endswith(".json")]
     submission_files = [
         "detailed_outputs.json",
         "submission_4o.json",
@@ -189,7 +187,7 @@ def gather_all_results(results_dir: str, solutions: Dict[str, Any]) -> List[Dict
     return all_results
 
 ###############################################################################
-# STEP 4: NORMALITY CHECKS
+# STEP 4: HELPER FUNCTIONS FOR STATISTICS
 ###############################################################################
 def compute_paired_differences(
     reference_scores: List[float],
@@ -203,6 +201,27 @@ def compute_paired_differences(
         raise ValueError("Reference and other scores must have the same length for paired comparison.")
     differences = np.array([o - r for o, r in zip(other_scores, reference_scores)])
     return differences
+
+def cohen_d_for_paired(differences: np.ndarray) -> float:
+    """
+    Computes Cohen's d for paired samples.
+    d = mean(differences) / std(differences)
+    """
+    mean_diff = np.mean(differences)
+    sd_diff = np.std(differences, ddof=1)
+    return mean_diff / sd_diff if sd_diff != 0 else 0.0
+
+def confidence_interval_of_difference(differences: np.ndarray, alpha=0.05) -> Tuple[float, float]:
+    """
+    Computes a 95% CI for the mean of the differences array using a t-distribution.
+    """
+    n = len(differences)
+    mean_diff = np.mean(differences)
+    sd_diff = np.std(differences, ddof=1)
+    se_diff = sd_diff / np.sqrt(n)
+    t_crit = t.ppf(1 - alpha/2, df=n-1)
+    margin_of_error = t_crit * se_diff
+    return (mean_diff - margin_of_error, mean_diff + margin_of_error)
 
 def perform_normality_tests(differences: np.ndarray) -> Tuple[float, float]:
     """
@@ -236,11 +255,16 @@ def plot_histogram_and_qq(differences: np.ndarray, model_name: str, reference_na
     plt.tight_layout()
     plt.show()
 
+###############################################################################
+# STEP 5: MAIN ANALYSIS AND APA-STYLE REPORTING
+###############################################################################
 def check_normality_for_all_submissions(all_results: List[Dict[str, Any]], reference_name: str):
     """
     Finds the reference submission in all_results, then for each other submission,
     computes (other - reference) differences in pixel correctness, runs normality
-    tests, and plots the distributions.
+    tests, and performs a paired t-test if normal or a Wilcoxon test if non-normal.
+    Additionally, ALWAYS performs a Wilcoxon test so that the mini models have 
+    explicit Wilcoxon scores.
     """
     reference_scores = None
     for item in all_results:
@@ -265,23 +289,36 @@ def check_normality_for_all_submissions(all_results: List[Dict[str, Any]], refer
 
         mean_diff = np.mean(differences)
         median_diff = np.median(differences)
+        alpha = 0.05
+        normal = (shapiro_p > alpha) and (ks_p > alpha)
 
         print("==============================================================")
-        print(f"Normality Check for {item['submission_name']} vs. {reference_name}")
+        print(f"Comparison: {item['submission_name']} vs. {reference_name}")
         print(f"Number of tasks: {len(differences)}")
-        print(f"Mean difference:   {mean_diff:.2f}")
-        print(f"Median difference: {median_diff:.2f}")
+        print(f"Mean difference (other - ref):   {mean_diff:.2f}")
+        print(f"Median difference (other - ref): {median_diff:.2f}")
         print(f"Shapiro–Wilk p-value: {shapiro_p:.4f} (p < 0.05 => non-normal)")
         print(f"K–S p-value:         {ks_p:.4f} (p < 0.05 => non-normal)")
 
+        # 1) Always compute Wilcoxon test
+        w_stat_wilcoxon, p_val_wilcoxon = wilcoxon(model_scores, reference_scores, zero_method='wilcox')
+        print(f"Wilcoxon: W={w_stat_wilcoxon:.3f}, p={p_val_wilcoxon:.4f} (non-parametric test)")
+
+        # 2) If data appear normal, also do a paired t-test
+        if normal:
+            t_stat, p_val_ttest = ttest_rel(model_scores, reference_scores)
+            d_val = cohen_d_for_paired(differences)
+            ci_low, ci_high = confidence_interval_of_difference(differences, alpha=alpha)
+            print(f"Paired t-test: t={t_stat:.3f}, p={p_val_ttest:.4f}")
+            print(f"Cohen's d for paired: {d_val:.3f}")
+            print(f"95% CI of difference: [{ci_low:.2f}, {ci_high:.2f}]")
+
         plot_histogram_and_qq(differences, item['submission_name'], reference_name)
 
-###############################################################################
-# MAIN
-###############################################################################
 if __name__ == "__main__":
     # 1) Gather all results by scoring each submission in the results directory
     all_results = gather_all_results(RESULTS_DIRECTORY, evaluation_solutions)
     
-    # 2) Perform normality checks on each submission compared to the reference
+    # 2) Perform normality checks on each submission compared to the reference,
+    #    and always compute Wilcoxon scores for all models (including mini).
     check_normality_for_all_submissions(all_results, REFERENCE_SUBMISSION)

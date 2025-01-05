@@ -1,6 +1,6 @@
-submission_name,total_score,total_tasks_scored,percentage,mean_pixel_correct,median_pixel_correct,wilcoxon_p_value
-submission_4o.json,8.50,28,30.36,71.51,75.00,Reference
-submission_4omini.json,3.50,28,12.5,61.47,66.67,0.1220
-submission_agentswtool.json,7.50,28,26.79,63.62,62.50,0.3890
-submission_finetune4o.json,16.00,28,57.14,86.88,100.00,0.0064
-submission_finetune4omini.json,10.50,28,37.5,73.62,80.00,0.7878
+submission_name,total_score,total_tasks_scored,percentage,mean_pixel_correct,median_pixel_correct,wilcoxon_p_value,wilcoxon_effect_size_r
+submission_4o.json,8.50,28,30.36,71.51,75.00,Reference,Reference
+submission_4omini.json,3.50,28,12.5,61.47,66.67,0.1220,2.4032
+submission_agentswtool.json,7.50,28,26.79,63.62,62.50,0.3890,2.6802
+submission_finetune4o.json,16.00,28,57.14,86.88,100.00,0.0064,4.4402
+submission_finetune4omini.json,10.50,28,37.5,73.62,80.00,0.7878,2.2871
