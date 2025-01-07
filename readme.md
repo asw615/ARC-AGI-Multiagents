@@ -56,6 +56,11 @@ After running the model, results are saved in the following files:
 - **`detailed_outputs.json`**: Provides detailed information about each prediction attempt.
 - **`rewoolanggraph.log`**: Logs detailed execution information for debugging.
 
+Unfortunately, the performance of the agentic framework did not surpass baseline results. <br>
+Fine-tuning - especially at test-time - seems to be a very promising strategy as shown from the 2024 [ARC Prize](https://arcprize.org/2024-results) competition <br><br>
+The results can be seen in the table below. <br>
+![Results]([https://arcprize.org/media/images/arc-example-task.jpg](https://github.com/asw615/ARC-AGI-Multiagents/blob/main/results/table_of_results.png))
+
 ## 📈 Future Steps
 
 To further enhance the system, future steps include:
